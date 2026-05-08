@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Canvas backup output
+*.imscc
+*.imscc.part
+canvas-backups/
+canvas-course-backups/
+canvas_backup_manifest.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+.venv/
+venv/
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
