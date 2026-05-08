@@ -6,6 +6,9 @@ Environment variables:
   CANVAS_BASE_URL    Example: https://school.instructure.com
   CANVAS_API_TOKEN   Canvas access token for an account admin
 
+The script automatically loads a .env file from the current directory when
+present. Values already set in the shell take precedence.
+
 Examples:
   # Auto-discover current courses in the root account and back them up.
   CANVAS_BASE_URL=https://school.instructure.com CANVAS_API_TOKEN=... \
@@ -65,6 +68,54 @@ class BackupResult:
 def log(message: str, *, file: Any = sys.stdout) -> None:
     with LOG_LOCK:
         print(message, file=file, flush=True)
+
+
+def load_dotenv(path: Path = Path(".env")) -> None:
+    if not path.exists():
+        return
+
+    with path.open("r", encoding="utf-8") as input_file:
+        for line_number, raw_line in enumerate(input_file, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export ") :].strip()
+            if "=" not in line:
+                raise CanvasError(f"Invalid .env line {line_number}: expected KEY=VALUE")
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = parse_dotenv_value(value.strip())
+
+            if not key or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+                raise CanvasError(f"Invalid .env variable name on line {line_number}: {key!r}")
+            os.environ.setdefault(key, value)
+
+
+def parse_dotenv_value(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        quote = value[0]
+        value = value[1:-1]
+        if quote == '"':
+            return bytes(value, "utf-8").decode("unicode_escape")
+        return value
+
+    return strip_unquoted_comment(value).strip()
+
+
+def strip_unquoted_comment(value: str) -> str:
+    escaped = False
+    for index, character in enumerate(value):
+        if escaped:
+            escaped = False
+            continue
+        if character == "\\":
+            escaped = True
+            continue
+        if character == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index]
+    return value
 
 
 class CanvasClient:
@@ -192,6 +243,9 @@ class CanvasClient:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    if not any(arg in ("-h", "--help") for arg in argv):
+        load_dotenv()
+
     parser = argparse.ArgumentParser(
         description="Export Canvas courses as IMS Common Cartridge (.imscc) backup files."
     )
@@ -294,7 +348,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str]) -> int:
-    args = parse_args(argv)
+    try:
+        args = parse_args(argv)
+    except CanvasError as exc:
+        log(f"Error: {exc}", file=sys.stderr)
+        return 2
+
     if not args.base_url:
         log("Missing --base-url or CANVAS_BASE_URL.", file=sys.stderr)
         return 2

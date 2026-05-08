@@ -23,15 +23,9 @@ Copy the sample environment file and fill in your Canvas instance details:
 cp .env.example .env
 ```
 
-Load those values into your shell:
+The script automatically loads `.env` from the current directory when it runs. Values already set in your shell take precedence over `.env`.
 
-```bash
-set -a
-source .env
-set +a
-```
-
-You can also pass these directly with `--base-url` and `--token`, but environment variables are safer because tokens are less likely to end up in shell history.
+You can also pass credentials directly with `--base-url` and `--token`, but `.env` or shell environment variables are safer because tokens are less likely to end up in shell history.
 
 ## Usage
 
