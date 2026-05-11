@@ -9,6 +9,7 @@
 canvas-backups/
 canvas-course-backups/
 canvas-archives/
+canvas_archives/
 canvas_backup_manifest.csv
 canvas_archive_manifest.csv
 

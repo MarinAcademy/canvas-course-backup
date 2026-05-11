@@ -352,6 +352,7 @@ def archive_imscc(ctx: ArchiveContext) -> str:
 
     assert ctx.client is not None
     try:
+        log(f"  course {ctx.course_id}: starting IMSCC export")
         export = start_export(ctx.client, ctx.course_id)
         completed_export = wait_for_export(
             ctx.client,
@@ -360,7 +361,12 @@ def archive_imscc(ctx: ArchiveContext) -> str:
             poll_interval=ctx.args.poll_interval,
             timeout_minutes=ctx.args.timeout_minutes,
         )
-        ctx.client.download(get_attachment_url(completed_export), destination)
+        log(f"  course {ctx.course_id}: IMSCC export ready")
+        ctx.client.download(
+            get_attachment_url(completed_export),
+            destination,
+            progress_label=f"course {ctx.course_id} IMSCC",
+        )
         return "downloaded"
     except CanvasError as exc:
         ctx.issues.append({"category": "imscc", "message": str(exc)})
@@ -449,16 +455,20 @@ def local_name(tag: str) -> str:
 
 
 def run_category(ctx: ArchiveContext, category: str, func: Callable[[], Any]) -> str:
+    log(f"  course {ctx.course_id}: {category} started")
     try:
         func()
+        log(f"  course {ctx.course_id}: {category} complete")
         return "ok"
     except CanvasError as exc:
         ctx.issues.append({"category": category, "message": str(exc)})
         write_json(ctx.data_dir / f"{category}.error.json", {"error": str(exc)})
+        log(f"  course {ctx.course_id}: {category} failed: {exc}")
         return "failed"
     except Exception as exc:
         ctx.issues.append({"category": category, "message": f"Unexpected error: {exc}"})
         write_json(ctx.data_dir / f"{category}.error.json", {"error": f"Unexpected error: {exc}"})
+        log(f"  course {ctx.course_id}: {category} failed: {exc}")
         return "failed"
 
 
@@ -511,9 +521,15 @@ def archive_submissions(ctx: ArchiveContext) -> None:
     assignments = read_json(ctx.data_dir / "assignments.json").get("assignments", [])
     all_submissions: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
+    log(f"  course {ctx.course_id}: fetching submissions for {len(assignments)} assignment(s)")
 
-    for assignment in assignments:
+    for index, assignment in enumerate(assignments, start=1):
         assignment_id = int(assignment["id"])
+        assignment_name = assignment.get("name") or f"assignment {assignment_id}"
+        log(
+            f"  course {ctx.course_id}: submissions {index}/{len(assignments)} "
+            f"{assignment_name} [{assignment_id}]"
+        )
         try:
             submissions = ctx.client.get_paginated(
                 f"/api/v1/courses/{ctx.course_id}/assignments/{assignment_id}/submissions",
@@ -533,8 +549,16 @@ def archive_submissions(ctx: ArchiveContext) -> None:
                 if ctx.args.include_submission_attachments:
                     download_submission_attachments(ctx, assignment_id, submission)
             all_submissions.extend(submissions)
+            log(
+                f"  course {ctx.course_id}: submissions {index}/{len(assignments)} "
+                f"complete ({len(submissions)} submission record(s))"
+            )
         except CanvasError as exc:
             errors.append({"assignment_id": str(assignment_id), "message": str(exc)})
+            log(
+                f"  course {ctx.course_id}: submissions {index}/{len(assignments)} "
+                f"failed for assignment {assignment_id}: {exc}"
+            )
 
     write_json(
         ctx.data_dir / "submissions.json",
@@ -591,6 +615,7 @@ def archive_discussions(ctx: ArchiveContext) -> None:
     )
     for topic in topics:
         topic_id = int(topic["id"])
+        log(f"  course {ctx.course_id}: discussion topic {topic_id} entries")
         try:
             topic["entries"] = ctx.client.get_paginated(
                 f"/api/v1/courses/{ctx.course_id}/discussion_topics/{topic_id}/entries",
@@ -630,6 +655,7 @@ def archive_course_files(ctx: ArchiveContext) -> None:
         f"/api/v1/courses/{ctx.course_id}/files",
         params={"per_page": 100, "include[]": ["user"]},
     )
+    log(f"  course {ctx.course_id}: downloading {len(files)} course file(s)")
     for file_record in files:
         download_attachment(ctx, file_record, Path("course_files"))
     write_json(ctx.data_dir / "files.json", {"files": files})

@@ -70,6 +70,18 @@ def log(message: str, *, file: Any = sys.stdout) -> None:
         print(message, file=file, flush=True)
 
 
+def format_bytes(value: int | None) -> str:
+    if value is None:
+        return "unknown size"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(value)
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{value} B"
+
+
 def load_dotenv(path: Path = Path(".env")) -> None:
     if not path.exists():
         return
@@ -150,19 +162,36 @@ class CanvasClient:
 
         return records
 
-    def download(self, url: str, destination: Path) -> None:
+    def download(self, url: str, destination: Path, progress_label: str | None = None) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         tmp_destination = destination.with_suffix(destination.suffix + ".part")
         request = self._build_request("GET", url, accept="application/octet-stream")
 
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                content_length = response.headers.get("Content-Length")
+                total_bytes = int(content_length) if content_length and content_length.isdigit() else None
+                downloaded_bytes = 0
+                last_log_time = time.monotonic()
+                if progress_label:
+                    size_text = f" ({format_bytes(total_bytes)})" if total_bytes else ""
+                    log(f"  downloading {progress_label}{size_text}...")
                 with tmp_destination.open("wb") as output:
                     while True:
                         chunk = response.read(1024 * 1024)
                         if not chunk:
                             break
                         output.write(chunk)
+                        downloaded_bytes += len(chunk)
+                        if progress_label and time.monotonic() - last_log_time >= 10:
+                            if total_bytes:
+                                log(
+                                    f"  downloading {progress_label}: "
+                                    f"{format_bytes(downloaded_bytes)} / {format_bytes(total_bytes)}"
+                                )
+                            else:
+                                log(f"  downloading {progress_label}: {format_bytes(downloaded_bytes)}")
+                            last_log_time = time.monotonic()
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise CanvasError(f"HTTP {exc.code} while downloading export: {body[:500]}") from exc
@@ -170,6 +199,8 @@ class CanvasClient:
             raise CanvasError(f"Network error while downloading export: {exc.reason}") from exc
 
         tmp_destination.replace(destination)
+        if progress_label:
+            log(f"  downloaded {progress_label}: {format_bytes(destination.stat().st_size)}")
 
     def _request_json(
         self,
