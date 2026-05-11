@@ -94,6 +94,17 @@ class ArchiveViewerTests(unittest.TestCase):
             self.assertNotIn("onclick", rewritten)
             self.assertIn("../files/course_files/42_handout.pdf", rewritten)
 
+    def test_submission_attachments_include_history_without_duplicates(self) -> None:
+        submission = {
+            "attachments": [{"id": 1, "filename": "first.pdf"}],
+            "submission_history": [
+                {"attachments": [{"id": 1, "filename": "first.pdf"}]},
+                {"attachments": [{"id": 2, "filename": "second.pdf"}]},
+            ],
+        }
+        attachments = archive.submission_attachments(submission)
+        self.assertEqual([attachment["id"] for attachment in attachments], [1, 2])
+
     def test_fixture_viewer_generation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = Path(tmp) / "fixture"

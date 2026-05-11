@@ -456,6 +456,10 @@ def run_category(ctx: ArchiveContext, category: str, func: Callable[[], Any]) ->
         ctx.issues.append({"category": category, "message": str(exc)})
         write_json(ctx.data_dir / f"{category}.error.json", {"error": str(exc)})
         return "failed"
+    except Exception as exc:
+        ctx.issues.append({"category": category, "message": f"Unexpected error: {exc}"})
+        write_json(ctx.data_dir / f"{category}.error.json", {"error": f"Unexpected error: {exc}"})
+        return "failed"
 
 
 def archive_modules(ctx: ArchiveContext) -> None:
@@ -543,7 +547,7 @@ def archive_submissions(ctx: ArchiveContext) -> None:
 def download_submission_attachments(
     ctx: ArchiveContext, assignment_id: int, submission: dict[str, Any]
 ) -> None:
-    for attachment in submission.get("attachments") or []:
+    for attachment in submission_attachments(submission):
         if not isinstance(attachment, dict):
             continue
         download_attachment(
@@ -553,6 +557,30 @@ def download_submission_attachments(
             / f"assignment_{assignment_id}"
             / f"user_{submission.get('user_id', 'unknown')}",
         )
+
+
+def submission_attachments(submission: dict[str, Any]) -> list[dict[str, Any]]:
+    attachments = []
+    seen: set[str] = set()
+
+    for attachment in submission.get("attachments") or []:
+        if isinstance(attachment, dict):
+            key = str(attachment.get("id") or attachment.get("url") or len(seen))
+            if key not in seen:
+                seen.add(key)
+                attachments.append(attachment)
+
+    for history_item in submission.get("submission_history") or []:
+        if not isinstance(history_item, dict):
+            continue
+        for attachment in history_item.get("attachments") or []:
+            if isinstance(attachment, dict):
+                key = str(attachment.get("id") or attachment.get("url") or len(seen))
+                if key not in seen:
+                    seen.add(key)
+                    attachments.append(attachment)
+
+    return attachments
 
 
 def archive_discussions(ctx: ArchiveContext) -> None:
