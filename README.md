@@ -9,6 +9,8 @@ The script can either:
 
 Downloaded files are named with the course name, course code, teacher names, and Canvas course ID. A CSV manifest is written alongside the exports.
 
+This repo also includes `canvas_archive_viewer.py`, a companion tool that creates a read-only emergency archive with course content, roster/grade snapshots, submissions, comments, attachments, discussions, files, and a static HTML viewer.
+
 ## Requirements
 
 - Python 3.10 or newer
@@ -64,6 +66,45 @@ Preview matching courses and filenames without creating Canvas exports:
 ```bash
 ./canvas_course_backup.py --dry-run --output-dir ./canvas-backups
 ```
+
+## Emergency Archive Viewer
+
+Create a portable archive bundle and static viewer for current courses:
+
+```bash
+./canvas_archive_viewer.py --archive-output-dir ./canvas-archives --workers 2
+```
+
+Archive specific courses:
+
+```bash
+./canvas_archive_viewer.py --course-ids 12345,23456 --archive-output-dir ./canvas-archives
+```
+
+Each course bundle contains:
+
+```text
+course.imscc
+data/
+files/
+viewer/index.html
+```
+
+The `data/` directory stores JSON snapshots for course metadata, modules, enrollments/grades, assignments, submissions, discussions, course files, IMSCC manifest content, and archive issues. The `files/` directory stores downloaded course files, submission attachments, discussion attachments, and extracted IMSCC content. The `viewer/` directory is a static admin-only HTML interface.
+
+Useful archive options:
+
+```text
+--archive-output-dir PATH              Output directory, default: canvas-archives
+--include-discussions / --no-include-discussions
+--include-course-files / --no-include-course-files
+--include-submission-attachments / --no-include-submission-attachments
+--skip-imscc                           Metadata-only rerun
+--generate-viewer / --no-generate-viewer
+--fixture-dir PATH                     Build viewer from existing data/*.json without Canvas
+```
+
+Quizzes are intentionally not archived in v1 beyond whatever assignment/submission grade metadata Canvas exposes through the normal assignment and submission APIs.
 
 ## What Counts as "Current"
 
@@ -161,6 +202,7 @@ The manifest includes:
 ## Security Notes
 
 - Do not commit `.env`, API tokens, `.imscc` exports, or backup manifests.
+- Do not commit `canvas-archives/`; it can contain student grades, submissions, comments, and downloaded files.
 - Use the least-privileged Canvas token that can read the target courses and create exports.
 - Treat exported `.imscc` files as sensitive course content.
 - If a token is ever committed or shared, revoke it in Canvas and create a new one.
@@ -176,5 +218,8 @@ Before publishing to GitHub:
 
 ```bash
 python3 -m py_compile canvas_course_backup.py
+python3 -m py_compile canvas_archive_viewer.py
+python3 -m unittest
 ./canvas_course_backup.py --help
+./canvas_archive_viewer.py --help
 ```

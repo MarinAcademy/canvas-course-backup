@@ -8,7 +8,9 @@
 *.imscc.part
 canvas-backups/
 canvas-course-backups/
+canvas-archives/
 canvas_backup_manifest.csv
+canvas_archive_manifest.csv
 
 # Python
 __pycache__/
