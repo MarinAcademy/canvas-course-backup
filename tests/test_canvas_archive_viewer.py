@@ -105,6 +105,19 @@ class ArchiveViewerTests(unittest.TestCase):
         attachments = archive.submission_attachments(submission)
         self.assertEqual([attachment["id"] for attachment in attachments], [1, 2])
 
+    def test_write_submissions_checkpoint_records_completed_assignments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "submissions.json"
+            archive.write_submissions_checkpoint(
+                path,
+                submissions=[{"assignment_id": 10, "user_id": 1}],
+                errors=[{"assignment_id": "11", "message": "Timeout"}],
+                completed_assignment_ids={10},
+            )
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["completed_assignment_ids"], [10])
+            self.assertEqual(data["errors"][0]["assignment_id"], "11")
+
     def test_fixture_viewer_generation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = Path(tmp) / "fixture"

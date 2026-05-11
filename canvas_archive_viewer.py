@@ -519,13 +519,30 @@ def archive_assignments(ctx: ArchiveContext) -> None:
 def archive_submissions(ctx: ArchiveContext) -> None:
     assert ctx.client is not None
     assignments = read_json(ctx.data_dir / "assignments.json").get("assignments", [])
-    all_submissions: list[dict[str, Any]] = []
-    errors: list[dict[str, str]] = []
+    existing = read_json(ctx.data_dir / "submissions.json")
+    all_submissions: list[dict[str, Any]] = existing.get("submissions", []) if isinstance(existing, dict) else []
+    errors: list[dict[str, str]] = existing.get("errors", []) if isinstance(existing, dict) else []
+    completed_assignment_ids = {
+        int(value)
+        for value in (existing.get("completed_assignment_ids", []) if isinstance(existing, dict) else [])
+    }
+    archived_assignment_ids = {
+        int(submission["assignment_id"])
+        for submission in all_submissions
+        if str(submission.get("assignment_id", "")).isdigit()
+    }
+    completed_assignment_ids.update(archived_assignment_ids)
     log(f"  course {ctx.course_id}: fetching submissions for {len(assignments)} assignment(s)")
 
     for index, assignment in enumerate(assignments, start=1):
         assignment_id = int(assignment["id"])
         assignment_name = assignment.get("name") or f"assignment {assignment_id}"
+        if assignment_id in completed_assignment_ids and not ctx.args.overwrite:
+            log(
+                f"  course {ctx.course_id}: submissions {index}/{len(assignments)} "
+                f"already archived, skipping {assignment_name} [{assignment_id}]"
+            )
+            continue
         log(
             f"  course {ctx.course_id}: submissions {index}/{len(assignments)} "
             f"{assignment_name} [{assignment_id}]"
@@ -548,7 +565,19 @@ def archive_submissions(ctx: ArchiveContext) -> None:
                 submission["assignment_id"] = assignment_id
                 if ctx.args.include_submission_attachments:
                     download_submission_attachments(ctx, assignment_id, submission)
+            all_submissions = [
+                submission
+                for submission in all_submissions
+                if int(submission.get("assignment_id") or 0) != assignment_id
+            ]
             all_submissions.extend(submissions)
+            completed_assignment_ids.add(assignment_id)
+            write_submissions_checkpoint(
+                ctx.data_dir / "submissions.json",
+                all_submissions,
+                errors,
+                completed_assignment_ids,
+            )
             log(
                 f"  course {ctx.course_id}: submissions {index}/{len(assignments)} "
                 f"complete ({len(submissions)} submission record(s))"
@@ -559,13 +588,37 @@ def archive_submissions(ctx: ArchiveContext) -> None:
                 f"  course {ctx.course_id}: submissions {index}/{len(assignments)} "
                 f"failed for assignment {assignment_id}: {exc}"
             )
+            write_submissions_checkpoint(
+                ctx.data_dir / "submissions.json",
+                all_submissions,
+                errors,
+                completed_assignment_ids,
+            )
 
-    write_json(
+    write_submissions_checkpoint(
         ctx.data_dir / "submissions.json",
-        {"submissions": all_submissions, "errors": errors},
+        all_submissions,
+        errors,
+        completed_assignment_ids,
     )
     if errors:
         ctx.issues.extend({"category": "submissions", **error} for error in errors)
+
+
+def write_submissions_checkpoint(
+    path: Path,
+    submissions: list[dict[str, Any]],
+    errors: list[dict[str, str]],
+    completed_assignment_ids: set[int],
+) -> None:
+    write_json(
+        path,
+        {
+            "submissions": submissions,
+            "errors": errors,
+            "completed_assignment_ids": sorted(completed_assignment_ids),
+        },
+    )
 
 
 def download_submission_attachments(

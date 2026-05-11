@@ -33,6 +33,7 @@ import datetime as dt
 import json
 import os
 import re
+import socket
 import sys
 import time
 import urllib.error
@@ -230,6 +231,16 @@ class CanvasClient:
                     self._sleep_before_retry(attempt, None)
                     continue
                 raise CanvasError(f"Network error {method} {path_or_url}: {exc.reason}") from exc
+            except TimeoutError as exc:
+                if attempt < 4:
+                    self._sleep_before_retry(attempt, None)
+                    continue
+                raise CanvasError(f"Timeout {method} {path_or_url}") from exc
+            except socket.timeout as exc:
+                if attempt < 4:
+                    self._sleep_before_retry(attempt, None)
+                    continue
+                raise CanvasError(f"Timeout {method} {path_or_url}") from exc
 
         raise CanvasError(f"Request failed after retries: {method} {path_or_url}")
 
