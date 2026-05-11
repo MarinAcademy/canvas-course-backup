@@ -102,9 +102,16 @@ Useful archive options:
 --skip-imscc                           Metadata-only rerun
 --generate-viewer / --no-generate-viewer
 --fixture-dir PATH                     Build viewer from existing data/*.json without Canvas
+--validate-archive PATH                Validate an existing archive bundle
 ```
 
 Quizzes are intentionally not archived in v1 beyond whatever assignment/submission grade metadata Canvas exposes through the normal assignment and submission APIs.
+
+Validate a completed archive bundle:
+
+```bash
+./canvas_archive_viewer.py --validate-archive "canvas-archives/Course Name - course_12345"
+```
 
 ## What Counts as "Current"
 

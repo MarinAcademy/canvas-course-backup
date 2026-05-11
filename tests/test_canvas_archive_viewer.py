@@ -139,6 +139,38 @@ class ArchiveViewerTests(unittest.TestCase):
             self.assertTrue(index.exists())
             self.assertIn("Demo Course", index.read_text(encoding="utf-8"))
 
+    def test_validate_archive_reports_counts_and_links(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "archive"
+            data = root / "data"
+            viewer = root / "viewer"
+            files = root / "files"
+            data.mkdir(parents=True)
+            viewer.mkdir()
+            files.mkdir()
+            for name, payload in {
+                "course": {"id": 1},
+                "enrollments": {"enrollments": [{"id": 1}]},
+                "assignments": {"assignments": [{"id": 2}]},
+                "submissions": {"submissions": [{"id": 3}]},
+                "modules": {"modules": []},
+                "files": {"files": [{"id": 4}]},
+                "issues": [],
+                "discussions": {"topics": []},
+                "imscc": {"resources": []},
+            }.items():
+                write_json(data / f"{name}.json", payload)
+            (files / "handout.pdf").write_text("ok", encoding="utf-8")
+            for name in ["index", "gradebook", "students", "files"]:
+                (viewer / f"{name}.html").write_text(
+                    '<a href="../files/handout.pdf">handout</a>', encoding="utf-8"
+                )
+
+            report = archive.validate_archive(root)
+            self.assertEqual(report["status"], "ok")
+            self.assertEqual(report["data_counts"]["submissions"], 1)
+            self.assertEqual(report["missing_links"], [])
+
 
 def write_json(path: Path, data: object) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")

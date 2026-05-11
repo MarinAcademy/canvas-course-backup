@@ -21,9 +21,11 @@ import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable
 from xml.etree import ElementTree
+from urllib.parse import unquote, urlsplit
 
 from canvas_course_backup import (
     CanvasClient,
@@ -154,6 +156,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=Path,
         help="Build a static viewer from existing data/*.json fixture files without calling Canvas.",
     )
+    parser.add_argument(
+        "--validate-archive",
+        type=Path,
+        help="Validate an existing course archive bundle without calling Canvas.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="List target bundles without archiving.")
 
     args = parser.parse_args(argv)
@@ -172,6 +179,9 @@ def main(argv: list[str]) -> int:
     if args.workers < 1:
         log("--workers must be 1 or greater.", file=sys.stderr)
         return 2
+
+    if args.validate_archive:
+        return validate_archive_command(args.validate_archive)
 
     if args.fixture_dir:
         return build_viewer_from_fixture(args)
@@ -799,6 +809,110 @@ def build_viewer_from_fixture(args: argparse.Namespace) -> int:
     generate_viewer(ctx)
     log(f"Generated fixture viewer: {ctx.viewer_dir / 'index.html'}")
     return 0
+
+
+def validate_archive_command(archive_root: Path) -> int:
+    report = validate_archive(archive_root)
+    log(json.dumps(report, indent=2, sort_keys=True))
+    return 1 if report["missing_required"] or report["missing_links"] else 0
+
+
+def validate_archive(archive_root: Path) -> dict[str, Any]:
+    required_files = [
+        Path("data/course.json"),
+        Path("data/enrollments.json"),
+        Path("data/assignments.json"),
+        Path("data/submissions.json"),
+        Path("data/modules.json"),
+        Path("data/files.json"),
+        Path("data/issues.json"),
+        Path("viewer/index.html"),
+        Path("viewer/gradebook.html"),
+        Path("viewer/students.html"),
+        Path("viewer/files.html"),
+    ]
+    missing_required = [
+        path.as_posix() for path in required_files if not (archive_root / path).exists()
+    ]
+    missing_links = find_missing_viewer_links(archive_root)
+    data_counts = archive_data_counts(archive_root / "data")
+    return {
+        "archive": str(archive_root),
+        "status": "ok" if not missing_required and not missing_links else "failed",
+        "missing_required": missing_required,
+        "missing_links": missing_links,
+        "data_counts": data_counts,
+        "viewer_html_files": len(list((archive_root / "viewer").glob("*.html"))),
+    }
+
+
+def archive_data_counts(data_dir: Path) -> dict[str, Any]:
+    counts: dict[str, Any] = {}
+    mapping = {
+        "issues": "issues",
+        "enrollments": "enrollments",
+        "assignments": "assignments",
+        "submissions": "submissions",
+        "discussions": "topics",
+        "files": "files",
+        "modules": "modules",
+        "imscc": "resources",
+    }
+    for filename, key in mapping.items():
+        data = read_json(data_dir / f"{filename}.json")
+        if isinstance(data, list):
+            counts[filename] = len(data)
+        elif isinstance(data, dict) and isinstance(data.get(key), list):
+            counts[filename] = len(data[key])
+        else:
+            counts[filename] = None
+    return counts
+
+
+def find_missing_viewer_links(archive_root: Path) -> list[dict[str, str]]:
+    viewer_dir = archive_root / "viewer"
+    if not viewer_dir.exists():
+        return [{"source": str(viewer_dir), "target": "", "reason": "viewer directory missing"}]
+
+    missing: list[dict[str, str]] = []
+    archive_root_resolved = archive_root.resolve()
+    for html_file in viewer_dir.glob("*.html"):
+        parser = ViewerLinkParser(html_file, archive_root_resolved, missing)
+        parser.feed(html_file.read_text(encoding="utf-8", errors="ignore"))
+    return missing
+
+
+class ViewerLinkParser(HTMLParser):
+    def __init__(
+        self,
+        source: Path,
+        archive_root: Path,
+        missing: list[dict[str, str]],
+    ) -> None:
+        super().__init__()
+        self.source = source
+        self.archive_root = archive_root
+        self.missing = missing
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for key, value in attrs:
+            if key not in ("href", "src") or not value:
+                continue
+            if value.startswith(("http:", "https:", "mailto:", "#", "javascript:")):
+                continue
+            target_path = unquote(urlsplit(value).path)
+            target = (self.source.parent / target_path).resolve()
+            try:
+                target.relative_to(self.archive_root)
+            except ValueError:
+                self.missing.append(
+                    {"source": str(self.source), "target": value, "reason": "outside archive"}
+                )
+                continue
+            if not target.exists():
+                self.missing.append(
+                    {"source": str(self.source), "target": value, "reason": "missing"}
+                )
 
 
 def load_archive_data(data_dir: Path) -> dict[str, Any]:
