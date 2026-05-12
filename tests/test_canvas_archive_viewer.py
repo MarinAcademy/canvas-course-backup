@@ -118,6 +118,32 @@ class ArchiveViewerTests(unittest.TestCase):
             self.assertEqual(data["completed_assignment_ids"], [10])
             self.assertEqual(data["errors"][0]["assignment_id"], "11")
 
+    def test_submission_archive_state_refresh_starts_clean(self) -> None:
+        existing = {
+            "submissions": [{"assignment_id": 10, "user_id": 1}],
+            "errors": [{"assignment_id": "11", "message": "Timeout"}],
+            "completed_assignment_ids": [10],
+        }
+        submissions, errors, completed = archive.submission_archive_state(existing, "refresh")
+        self.assertEqual(submissions, [])
+        self.assertEqual(errors, [])
+        self.assertEqual(completed, set())
+
+    def test_submission_archive_state_resume_keeps_completed_assignments(self) -> None:
+        existing = {
+            "submissions": [{"assignment_id": 10, "user_id": 1}],
+            "errors": [],
+            "completed_assignment_ids": [],
+        }
+        submissions, errors, completed = archive.submission_archive_state(existing, "resume")
+        self.assertEqual(len(submissions), 1)
+        self.assertEqual(errors, [])
+        self.assertEqual(completed, {10})
+
+    def test_parse_args_rejects_conflicting_imscc_options(self) -> None:
+        with self.assertRaises(SystemExit):
+            archive.parse_args(["--skip-imscc", "--refresh-imscc"])
+
     def test_fixture_viewer_generation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = Path(tmp) / "fixture"

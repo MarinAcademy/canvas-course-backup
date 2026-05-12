@@ -146,6 +146,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--skip-imscc", action="store_true", help="Skip IMSCC export/download.")
     parser.add_argument(
+        "--refresh-imscc",
+        action="store_true",
+        help="Regenerate course.imscc and extracted IMSCC content without overwriting other files.",
+    )
+    parser.add_argument(
+        "--submission-mode",
+        choices=["resume", "refresh", "skip"],
+        default="resume",
+        help=(
+            "Submission archive behavior: resume skips completed assignments, refresh re-fetches "
+            "submission records, skip leaves submissions unchanged. Default: resume."
+        ),
+    )
+    parser.add_argument(
         "--generate-viewer",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -166,6 +180,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.state is None:
         args.state = ["available"]
+    if args.skip_imscc and args.refresh_imscc:
+        parser.error("--skip-imscc and --refresh-imscc cannot be used together")
     return args
 
 
@@ -299,7 +315,9 @@ def archive_course(
 
     category_status: dict[str, str] = {}
     imscc_status = "skipped" if args.skip_imscc else archive_imscc(ctx)
-    if imscc_status in ("downloaded", "exists"):
+    if args.skip_imscc and (ctx.data_dir / "imscc.json").exists():
+        category_status["imscc_content"] = "exists"
+    elif imscc_status in ("downloaded", "exists"):
         category_status["imscc_content"] = run_category(
             ctx, "imscc_content", lambda: archive_imscc_content(ctx)
         )
@@ -357,7 +375,7 @@ def archive_course(
 
 def archive_imscc(ctx: ArchiveContext) -> str:
     destination = ctx.root / "course.imscc"
-    if destination.exists() and not ctx.args.overwrite:
+    if destination.exists() and not ctx.args.overwrite and not ctx.args.refresh_imscc:
         return "exists"
 
     assert ctx.client is not None
@@ -372,6 +390,8 @@ def archive_imscc(ctx: ArchiveContext) -> str:
             timeout_minutes=ctx.args.timeout_minutes,
         )
         log(f"  course {ctx.course_id}: IMSCC export ready")
+        if ctx.args.refresh_imscc:
+            remove_existing_imscc_content(ctx)
         ctx.client.download(
             get_attachment_url(completed_export),
             destination,
@@ -381,6 +401,20 @@ def archive_imscc(ctx: ArchiveContext) -> str:
     except CanvasError as exc:
         ctx.issues.append({"category": "imscc", "message": str(exc)})
         return "failed"
+
+
+def remove_existing_imscc_content(ctx: ArchiveContext) -> None:
+    imscc_data = ctx.data_dir / "imscc.json"
+    if imscc_data.exists():
+        imscc_data.unlink()
+    extract_dir = ctx.files_dir / "imscc_content"
+    if not extract_dir.exists():
+        return
+    for path in sorted(extract_dir.rglob("*"), reverse=True):
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+        elif path.is_dir():
+            path.rmdir()
 
 
 def archive_imscc_content(ctx: ArchiveContext) -> None:
@@ -528,26 +562,28 @@ def archive_assignments(ctx: ArchiveContext) -> None:
 
 def archive_submissions(ctx: ArchiveContext) -> None:
     assert ctx.client is not None
+    if ctx.args.submission_mode == "skip":
+        existing = read_json(ctx.data_dir / "submissions.json")
+        if not existing:
+            write_submissions_checkpoint(ctx.data_dir / "submissions.json", [], [], set())
+        log(f"  course {ctx.course_id}: submissions skipped")
+        return
+
     assignments = read_json(ctx.data_dir / "assignments.json").get("assignments", [])
     existing = read_json(ctx.data_dir / "submissions.json")
-    all_submissions: list[dict[str, Any]] = existing.get("submissions", []) if isinstance(existing, dict) else []
-    errors: list[dict[str, str]] = existing.get("errors", []) if isinstance(existing, dict) else []
-    completed_assignment_ids = {
-        int(value)
-        for value in (existing.get("completed_assignment_ids", []) if isinstance(existing, dict) else [])
-    }
-    archived_assignment_ids = {
-        int(submission["assignment_id"])
-        for submission in all_submissions
-        if str(submission.get("assignment_id", "")).isdigit()
-    }
-    completed_assignment_ids.update(archived_assignment_ids)
+    all_submissions, errors, completed_assignment_ids = submission_archive_state(
+        existing, ctx.args.submission_mode
+    )
     log(f"  course {ctx.course_id}: fetching submissions for {len(assignments)} assignment(s)")
 
     for index, assignment in enumerate(assignments, start=1):
         assignment_id = int(assignment["id"])
         assignment_name = assignment.get("name") or f"assignment {assignment_id}"
-        if assignment_id in completed_assignment_ids and not ctx.args.overwrite:
+        if (
+            ctx.args.submission_mode == "resume"
+            and assignment_id in completed_assignment_ids
+            and not ctx.args.overwrite
+        ):
             log(
                 f"  course {ctx.course_id}: submissions {index}/{len(assignments)} "
                 f"already archived, skipping {assignment_name} [{assignment_id}]"
@@ -629,6 +665,26 @@ def write_submissions_checkpoint(
             "completed_assignment_ids": sorted(completed_assignment_ids),
         },
     )
+
+
+def submission_archive_state(
+    existing: Any, submission_mode: str
+) -> tuple[list[dict[str, Any]], list[dict[str, str]], set[int]]:
+    if not isinstance(existing, dict) or submission_mode == "refresh":
+        return [], [], set()
+
+    all_submissions: list[dict[str, Any]] = existing.get("submissions", [])
+    errors: list[dict[str, str]] = existing.get("errors", [])
+    completed_assignment_ids = {
+        int(value) for value in existing.get("completed_assignment_ids", [])
+    }
+    archived_assignment_ids = {
+        int(submission["assignment_id"])
+        for submission in all_submissions
+        if str(submission.get("assignment_id", "")).isdigit()
+    }
+    completed_assignment_ids.update(archived_assignment_ids)
+    return all_submissions, errors, completed_assignment_ids
 
 
 def download_submission_attachments(

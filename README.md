@@ -100,6 +100,8 @@ Useful archive options:
 --include-course-files / --no-include-course-files
 --include-submission-attachments / --no-include-submission-attachments
 --skip-imscc                           Metadata-only rerun
+--refresh-imscc                        Replace only course.imscc and extracted IMSCC content
+--submission-mode resume|refresh|skip   Submission behavior, default: resume
 --generate-viewer / --no-generate-viewer
 --fixture-dir PATH                     Build viewer from existing data/*.json without Canvas
 --validate-archive PATH                Validate an existing archive bundle
@@ -111,6 +113,18 @@ Validate a completed archive bundle:
 
 ```bash
 ./canvas_archive_viewer.py --validate-archive "canvas-archives/Course Name - course_12345"
+```
+
+For scheduled backups, refresh submission metadata while reusing downloaded attachment files:
+
+```bash
+./canvas_archive_viewer.py --course-ids 12345 --archive-output-dir ./canvas-archives --skip-imscc --submission-mode refresh
+```
+
+For a weekly course-shell refresh, regenerate only the IMSCC export and extracted IMSCC content:
+
+```bash
+./canvas_archive_viewer.py --course-ids 12345 --archive-output-dir ./canvas-archives --refresh-imscc --submission-mode refresh
 ```
 
 ## What Counts as "Current"
