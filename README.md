@@ -1,6 +1,6 @@
 # Canvas Course Backup
 
-Backup Canvas LMS courses as IMS Common Cartridge (`.imscc`) exports.
+Backup Canvas LMS courses as IMS Common Cartridge (`.imscc`) exports and optionally create a read-only emergency archive viewer.
 
 The script can either:
 
@@ -9,7 +9,7 @@ The script can either:
 
 Downloaded files are named with the course name, course code, teacher names, and Canvas course ID. A CSV manifest is written alongside the exports.
 
-This repo also includes `canvas_archive_viewer.py`, a companion tool that creates a read-only emergency archive with course content, roster/grade snapshots, submissions, comments, attachments, discussions, files, and a static HTML viewer.
+This repo also includes `canvas_archive_viewer.py`, a companion tool that creates a read-only emergency archive with course content, roster/grade snapshots, submissions, comments, attachments, discussions, files, and a static HTML viewer. The viewer is for continuity and records access; it is not a live Canvas replacement.
 
 ## Requirements
 
@@ -92,6 +92,24 @@ viewer/index.html
 
 The `data/` directory stores JSON snapshots for course metadata, modules, enrollments/grades, assignments, submissions, discussions, course files, IMSCC manifest content, and archive issues. The `files/` directory stores downloaded course files, submission attachments, discussion attachments, and extracted IMSCC content. The `viewer/` directory is a static admin-only HTML interface.
 
+View a generated archive:
+
+```bash
+open "canvas-archives/Course Name - course_12345/viewer/index.html"
+```
+
+If browser security blocks local links, serve the archive directory locally:
+
+```bash
+python3 -m http.server 8765 --directory canvas-archives
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8765/Course%20Name%20-%20course_12345/viewer/index.html
+```
+
 Useful archive options:
 
 ```text
@@ -108,6 +126,8 @@ Useful archive options:
 ```
 
 Quizzes are intentionally not archived in v1 beyond whatever assignment/submission grade metadata Canvas exposes through the normal assignment and submission APIs.
+
+The archive viewer can help during an outage and the `course.imscc` file can rebuild much of a Canvas course shell, but student work, grade history, comments, enrollments, and LTI/external tool state are not restorable as native Canvas course history through IMSCC.
 
 Validate a completed archive bundle:
 
@@ -126,6 +146,8 @@ For a weekly course-shell refresh, regenerate only the IMSCC export and extracte
 ```bash
 ./canvas_archive_viewer.py --course-ids 12345 --archive-output-dir ./canvas-archives --refresh-imscc --submission-mode refresh
 ```
+
+For interrupted runs, keep the default `--submission-mode resume`; it skips assignment submissions already checkpointed in `data/submissions.json`.
 
 ## What Counts as "Current"
 
@@ -223,7 +245,7 @@ The manifest includes:
 ## Security Notes
 
 - Do not commit `.env`, API tokens, `.imscc` exports, or backup manifests.
-- Do not commit `canvas-archives/`; it can contain student grades, submissions, comments, and downloaded files.
+- Do not commit `canvas-archives/` or `canvas_archives/`; they can contain student grades, submissions, comments, and downloaded files.
 - Use the least-privileged Canvas token that can read the target courses and create exports.
 - Treat exported `.imscc` files as sensitive course content.
 - If a token is ever committed or shared, revoke it in Canvas and create a new one.
